@@ -1,61 +1,29 @@
 const std = @import("std");
 
-const GRID_SIZE = std.math.maxInt(u16);
+const GRID_SIZE = 30000;
 const CENTER_POINT: u32 = GRID_SIZE / 2;
 
-const MASK_WIRE_1: u8 = 0b0000001;
-const MASK_WIRE_2: u8 = 0b0000010;
-const MASK_WIRE_BOTH: u8 = 0b00000011;
-
 const Grid = struct {
-    buf: [][GRID_SIZE]u8,
     nearestCollisionDistance: u64,
-    minUD: u16,
-    minRL: u16,
-    maxUD: u16,
-    maxRL: u16,
+    fewestStepsToCollision: u64,
 
-    pub fn visit(self: *Grid, posUD: u16, posRL: u16, mask: u8) void {
-        self.buf[posUD][posRL] |= mask;
+    buf: [][GRID_SIZE]u32,
 
-        if (self.buf[posUD][posRL] == MASK_WIRE_BOTH) {
-            const distance = computeManhattanDistanceFromCenter(posUD, posRL);
-            if (distance < self.nearestCollisionDistance) {
-                self.nearestCollisionDistance = distance;
-            }
-        }
+    pub fn visit(self: *Grid, wire: *Wire) void {
+        if (wire.id == 1) {
+            if (self.buf[wire.posUD][wire.posRL] != 0) {
+                const distance = computeManhattanDistanceFromCenter(wire.posUD, wire.posRL);
+                if (distance < self.nearestCollisionDistance) {
+                    self.nearestCollisionDistance = distance;
+                }
 
-        if (posUD < self.minUD) {
-            self.minUD = posUD;
-        }
-        if (posUD > self.maxUD) {
-            self.maxUD = posUD;
-        }
-        if (posRL < self.minRL) {
-            self.minRL = posRL;
-        }
-        if (posRL > self.maxRL) {
-            self.maxRL = posRL;
-        }
-    }
-
-    pub fn printGrid(self: *Grid, stream: *std.fs.File.OutStream.Stream) !void {
-        var i: u32 = self.minUD;
-        while (i <= self.maxUD) : (i += 1) {
-            var j: u32 = self.minRL;
-            while (j <= self.maxRL) : (j += 1) {
-                const char = self.buf[i][j];
-                if (i == CENTER_POINT and j == CENTER_POINT) {
-                    try stream.print("#");
-                } else if (char == 0) {
-                    try stream.print(" ");
-                } else if (char == MASK_WIRE_1 or char == MASK_WIRE_2) {
-                    try stream.print(".");
-                } else {
-                    try stream.print("X");
+                const steps = self.buf[wire.posUD][wire.posRL] + wire.stepsTaken;
+                if (steps < self.fewestStepsToCollision) {
+                    self.fewestStepsToCollision = steps;
                 }
             }
-            try stream.print("\n");
+        } else {
+            self.buf[wire.posUD][wire.posRL] = wire.stepsTaken;
         }
     }
 };
@@ -63,7 +31,8 @@ const Grid = struct {
 const Wire = struct {
     posRL: u16,
     posUD: u16,
-    mask: u8,
+    id: u8,
+    stepsTaken: u32,
 
     pub fn performMove(self: *Wire, grid: *Grid, distance: u32, direction: u8) void {
         var i: u32 = 0;
@@ -71,25 +40,29 @@ const Wire = struct {
             'R' => {
                 while (i < distance) : (i += 1) {
                     self.posRL += 1;
-                    grid.visit(self.posUD, self.posRL, self.mask);
+                    self.stepsTaken += 1;
+                    grid.visit(self);
                 }
             },
             'L' => {
                 while (i < distance) : (i += 1) {
                     self.posRL -= 1;
-                    grid.visit(self.posUD, self.posRL, self.mask);
+                    self.stepsTaken += 1;
+                    grid.visit(self);
                 }
             },
             'U' => {
                 while (i < distance) : (i += 1) {
                     self.posUD -= 1;
-                    grid.visit(self.posUD, self.posRL, self.mask);
+                    self.stepsTaken += 1;
+                    grid.visit(self);
                 }
             },
             'D' => {
                 while (i < distance) : (i += 1) {
                     self.posUD += 1;
-                    grid.visit(self.posUD, self.posRL, self.mask);
+                    self.stepsTaken += 1;
+                    grid.visit(self);
                 }
             },
             else => unreachable,
@@ -125,16 +98,14 @@ pub fn main() anyerror!void {
     var wire = Wire {
         .posRL = CENTER_POINT,
         .posUD = CENTER_POINT,
-        .mask = MASK_WIRE_1,
+        .id = 0,
+        .stepsTaken = 0,
     };
 
     var grid = Grid {
-        .buf = try allocator.alloc([GRID_SIZE]u8, GRID_SIZE),
+        .buf = try allocator.alloc([GRID_SIZE]u32, GRID_SIZE),
         .nearestCollisionDistance = std.math.maxInt(u64),
-        .minUD = CENTER_POINT,
-        .maxUD = CENTER_POINT,
-        .minRL = CENTER_POINT,
-        .maxRL = CENTER_POINT,
+        .fewestStepsToCollision = std.math.maxInt(u32),
     };
 
     {
@@ -174,7 +145,8 @@ pub fn main() anyerror!void {
                     distanceStartIndex = 0;
                     wire.posRL = CENTER_POINT;
                     wire.posUD = CENTER_POINT;
-                    wire.mask = MASK_WIRE_2;
+                    wire.id = 1;
+                    wire.stepsTaken = 0;
                 },
                 else => unreachable,
             }
@@ -183,5 +155,5 @@ pub fn main() anyerror!void {
     
     const stdout = &std.io.getStdOut().outStream().stream;
     try stdout.print("distance: {}\n", grid.nearestCollisionDistance);
-    //try grid.printGrid(stdout);
+    try stdout.print("fewest steps: {}\n", grid.fewestStepsToCollision);
 }
