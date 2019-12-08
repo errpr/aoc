@@ -3,14 +3,212 @@ const std = @import("std");
 const IMMEDIATE_MODE = 1;
 const POSITION_MODE = 0;
 const RAM_SIZE = 1024;
+const ExecutionState = enum {
+    Running,
+    Suspended,
+    Terminated,
+};
+
+const Computer = struct {
+    id: u8,
+    executionState: ExecutionState,
+    ram: [RAM_SIZE]i32,
+    instructionPtr: u32,
+    phase: i32,
+    input: *Computer,
+    output: i32,
+    haveReadPhase: bool,
+    haveOutputReady: bool,
+
+    pub fn run(self: *Computer) void {
+        self.executionState = .Running;
+        while(true) {
+            if (self.executionState != .Running) break;
+            //std.debug.warn("{c} :: inst {} data {} ", self.id, self.instructionPtr, self.ram[self.instructionPtr]);
+            switch(extractOpcode(self.ram[self.instructionPtr])) {
+                1 => self.add(),
+                2 => self.mul(),
+                3 => self.in(),
+                4 => self.out(),
+                5 => self.jmpTrue(),
+                6 => self.jmpFalse(),
+                7 => self.lessThan(),
+                8 => self.equals(),
+                99 => self.exit(),
+                else => unreachable,
+            }
+        }
+    }
+
+    fn exit(self: *Computer) void {
+        //std.debug.warn("exit\n");
+        self.executionState = .Terminated;
+    }
+
+    fn add(self: *Computer) void {
+        const modes = extractParameterModes(self.ram[self.instructionPtr]);
+
+        // std.debug.warn("add {}:{} {}:{} {}:{}\n", 
+        //     if (modes[0] == IMMEDIATE_MODE) "I" else "P", self.ram[self.instructionPtr + 1], 
+        //     if (modes[1] == IMMEDIATE_MODE) "I" else "P", self.ram[self.instructionPtr + 2], 
+        //     "P", self.ram[self.instructionPtr + 3]);
+
+        const a = if (modes[0] == IMMEDIATE_MODE) self.ram[self.instructionPtr + 1] else self.ram[@intCast(u32, self.ram[self.instructionPtr + 1])];
+        const b = if (modes[1] == IMMEDIATE_MODE) self.ram[self.instructionPtr + 2] else self.ram[@intCast(u32, self.ram[self.instructionPtr + 2])];
+        const storePosition = @intCast(u32, self.ram[self.instructionPtr + 3]);
+
+        self.ram[storePosition] = a + b;
+        //std.debug.warn("put {} in position {}\n", a + b, storePosition);
+
+        self.instructionPtr += 4;
+    }
+
+    fn mul(self: *Computer) void {
+        const modes = extractParameterModes(self.ram[self.instructionPtr]);
+
+        // std.debug.warn("mul {}:{} {}:{} {}:{}\n", 
+        //     if (modes[0] == IMMEDIATE_MODE) "I" else "P", self.ram[self.instructionPtr + 1], 
+        //     if (modes[1] == IMMEDIATE_MODE) "I" else "P", self.ram[self.instructionPtr + 2], 
+        //     "P", self.ram[self.instructionPtr + 3]);
+
+        const a = if (modes[0] == IMMEDIATE_MODE) self.ram[self.instructionPtr + 1] else self.ram[@intCast(u32, self.ram[self.instructionPtr + 1])];
+        const b = if (modes[1] == IMMEDIATE_MODE) self.ram[self.instructionPtr + 2] else self.ram[@intCast(u32, self.ram[self.instructionPtr + 2])];
+        const storePosition = @intCast(u32, self.ram[self.instructionPtr + 3]);
+
+        self.ram[storePosition] = a * b;
+        //std.debug.warn("put {} in position {}\n", a * b, storePosition);
+
+        self.instructionPtr += 4;
+    }
+
+    fn in(self: *Computer) void {
+        // std.debug.warn("in P:{}\n", self.ram[self.instructionPtr + 1]);
+        const storePosition =  @intCast(u32, self.ram[self.instructionPtr + 1]);
+        
+        if (!self.haveReadPhase) {
+            self.ram[storePosition] = self.phase;
+            //std.debug.warn("put {} in position {}\n", self.phase, storePosition);
+            self.haveReadPhase = true;
+        } else if (self.input.haveOutputReady) {
+            self.ram[storePosition] = self.input.output;
+            //std.debug.warn("put {} in position {}\n", self.input.output, storePosition);
+            self.input.haveOutputReady = false;
+        } else {
+            self.executionState = .Suspended;
+            return;
+        }
+
+        self.instructionPtr += 2;
+    }
+
+    fn out(self: *Computer) void {
+        const modes = extractParameterModes(self.ram[self.instructionPtr]);
+        // std.debug.warn("out {}:{}\n", if (modes[0] == IMMEDIATE_MODE) "I" else "P", self.ram[self.instructionPtr + 1]);
+        const outValue = if (modes[0] == IMMEDIATE_MODE) self.ram[self.instructionPtr + 1] else self.ram[@intCast(u32, self.ram[self.instructionPtr + 1])];
+
+        std.debug.warn(" outputting {}\n", outValue);
+        self.output = outValue;
+        self.haveOutputReady = true;
+
+        self.instructionPtr += 2;
+    }
+
+    fn jmpTrue(self: *Computer) void {
+        const modes = extractParameterModes(self.ram[self.instructionPtr]);
+        // std.debug.warn("jmpTrue {}:{} {}:{}\n", 
+        //     if (modes[0] == IMMEDIATE_MODE) "I" else "P", self.ram[self.instructionPtr + 1], 
+        //     if (modes[1] == IMMEDIATE_MODE) "I" else "P", self.ram[self.instructionPtr + 2]);
+
+        const condition = if (modes[0] == IMMEDIATE_MODE) self.ram[self.instructionPtr + 1] else self.ram[@intCast(u32, self.ram[self.instructionPtr + 1])];
+        const label = if (modes[1] == IMMEDIATE_MODE) self.ram[self.instructionPtr + 2] else self.ram[@intCast(u32, self.ram[self.instructionPtr + 2])];
+
+        if (condition != 0) {
+            self.instructionPtr = @intCast(u32, label);
+            //std.debug.warn("jumped to {}\n", label);
+        } else {
+            self.instructionPtr += 3;
+            //std.debug.warn("did not jump\n");
+        }
+    }
+
+    fn jmpFalse(self: *Computer) void {
+        const modes = extractParameterModes(self.ram[self.instructionPtr]);
+        // std.debug.warn("jmpFalse {}:{} {}:{}\n", 
+        //     if (modes[0] == IMMEDIATE_MODE) "I" else "P", self.ram[self.instructionPtr + 1], 
+        //     if (modes[1] == IMMEDIATE_MODE) "I" else "P", self.ram[self.instructionPtr + 2]);
+
+        const condition = if (modes[0] == IMMEDIATE_MODE) self.ram[self.instructionPtr + 1] else self.ram[@intCast(u32, self.ram[self.instructionPtr + 1])];
+        const label = if (modes[1] == IMMEDIATE_MODE) self.ram[self.instructionPtr + 2] else self.ram[@intCast(u32, self.ram[self.instructionPtr + 2])];
+
+        if (condition == 0) {
+            self.instructionPtr = @intCast(u32, label);
+            //std.debug.warn("jumped to {}\n", label);
+        } else {
+            self.instructionPtr += 3;
+            //std.debug.warn("did not jump\n");
+        }
+    }
+
+    fn lessThan(self: *Computer) void {
+        const modes = extractParameterModes(self.ram[self.instructionPtr]);
+        // std.debug.warn("lessThan {}:{} {}:{} {}:{}\n", 
+        //     if (modes[0] == IMMEDIATE_MODE) "I" else "P", self.ram[self.instructionPtr + 1], 
+        //     if (modes[1] == IMMEDIATE_MODE) "I" else "P", self.ram[self.instructionPtr + 2],
+        //     "P", self.ram[self.instructionPtr + 3]);
+        
+        const a = if (modes[0] == IMMEDIATE_MODE) self.ram[self.instructionPtr + 1] else self.ram[@intCast(u32, self.ram[self.instructionPtr + 1])];
+        const b = if (modes[1] == IMMEDIATE_MODE) self.ram[self.instructionPtr + 2] else self.ram[@intCast(u32, self.ram[self.instructionPtr + 2])];
+        const r = @intCast(u32, self.ram[self.instructionPtr + 3]);
+
+        self.ram[r] = if (a < b) 1 else 0;
+        //std.debug.warn("put {} in position {}\n", self.ram[r], r);
+        self.instructionPtr += 4;
+    }
+
+    fn equals(self: *Computer) void {
+        const modes = extractParameterModes(self.ram[self.instructionPtr]);
+        // std.debug.warn("equals {}:{} {}:{} {}:{}\n", 
+        //     if (modes[0] == IMMEDIATE_MODE) "I" else "P", self.ram[self.instructionPtr + 1], 
+        //     if (modes[1] == IMMEDIATE_MODE) "I" else "P", self.ram[self.instructionPtr + 2], 
+        //     "P", self.ram[self.instructionPtr + 3]);
+        
+        const a = if (modes[0] == IMMEDIATE_MODE) self.ram[self.instructionPtr + 1] else self.ram[@intCast(u32, self.ram[self.instructionPtr + 1])];
+        const b = if (modes[1] == IMMEDIATE_MODE) self.ram[self.instructionPtr + 2] else self.ram[@intCast(u32, self.ram[self.instructionPtr + 2])];
+        const r = @intCast(u32, self.ram[self.instructionPtr + 3]);
+
+        self.ram[r] = if (a == b) 1 else 0;
+        //std.debug.warn("put {} in position {}\n", self.ram[r], r);
+        self.instructionPtr += 4;
+    }
+
+    fn extractOpcode(instruction: i32) u32 {
+        return @intCast(u32, instruction) % 100;
+    }
+
+    fn extractParameterModes(instruction: i32) [3]u32 {
+        const firstTwoDigits = extractOpcode(instruction);
+        var rest = (@intCast(u32, instruction) - firstTwoDigits) / 100;
+
+        const a = rest % 10;
+        rest = (rest - a) / 10;
+        const b = rest % 10;
+        rest = (rest - b) / 10;
+        const c = rest % 10;
+
+        return [_]u32 {
+            a,
+            b,
+            c
+        };
+    }
+};
 
 pub fn main() anyerror!void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const allocator = &arena.allocator;
     const file_string = try std.io.readFileAlloc(allocator, "input.txt");
-    // const file_string = "3,15,3,16,1002,16,10,16,1,16,15,15,4,15,99,0,0";
-    // const file_string = "3,23,3,24,1002,24,10,24,1002,23,-1,23,101,5,23,23,1,24,23,23,4,23,99,0,0";
-    // const file_string = "3,31,3,32,1002,32,10,32,1001,31,-2,31,1007,31,0,33,1002,33,7,33,1,33,31,31,1,32,31,31,4,31,99,0,0,0";
+    // const file_string = "3,26,1001,26,-4,26,3,27,1002,27,2,27,1,27,26,27,4,27,1001,28,-1,28,1005,28,6,99,0,0,5";
+    // const file_string = "3,52,1001,52,-5,52,3,53,1,52,56,54,1007,54,5,55,1005,55,26,1001,54,-5,54,1105,1,12,1,53,54,53,1008,54,0,55,1001,55,1,55,2,53,55,53,4,53,1001,56,-1,56,1005,56,6,99,0,0,0,0,10";
 
     var iterator = std.mem.tokenize(file_string, ",");
 
@@ -23,25 +221,46 @@ pub fn main() anyerror!void {
         }
     }
 
-    var workingSet = [_]i32{0} ** RAM_SIZE;
-    var permutations = generatePermutations(5, [_]i32 { 0, 1, 2, 3, 4 });
+    var amplifiers = try allocator.alloc(Computer, 5);
+    var permutations = generatePermutations(5, [_]i32 { 5, 6, 7, 8, 9 });
     var maxPermutation = [_]i32 {0,0,0,0,0};
     var maxOutput: i32 = std.math.minInt(i32);
+
+    var two = false;
+
     for (permutations) |permutation| {
-        var input: i32 = 0;
-        var output: i32 = 0;
-        const amplifiers = [5]u8 { 'A', 'B', 'C', 'D', 'E' };
         std.debug.warn(" permutation: {} {} {} {} {}\n", permutation[0], permutation[1], permutation[2], permutation[3], permutation[4]);
-        var i: u32 = 0;
-        while (i < 5) : (i += 1) {
-            std.mem.swap(i32, &input, &output);
-            arrayCopy(RAM_SIZE, &data, &workingSet);
-            runProgramOnAmplifier(workingSet[0..], permutation[i], &input, &output);
-            std.debug.warn("\n amplifier {} output: {}\n", amplifiers[i], output);
+        
+        {   // set up amplifiers once for each permutation
+            var i: u32 = 0;
+            while (i < amplifiers.len) : (i += 1) {
+                amplifiers[i].id = @intCast(u8, i) + 'A';
+                arrayCopy(RAM_SIZE, &data, &amplifiers[i].ram);
+                amplifiers[i].instructionPtr = 0;
+                amplifiers[i].phase = permutation[i];
+                amplifiers[i].output = 0;
+                if (i == 0) {
+                    amplifiers[i].input = &amplifiers[4];
+                } else {
+                    amplifiers[i].input = &amplifiers[i - 1];
+                }
+                amplifiers[i].executionState = .Suspended;
+                amplifiers[i].haveReadPhase = false;
+                amplifiers[i].haveOutputReady = (i == 4);
+            }
         }
 
-        if (output > maxOutput) {
-            maxOutput = output;
+        var i: u32 = 0;
+        while (true) : ({i += 1; i %= 5;}) {
+            if (amplifiers[i].executionState != .Terminated) {
+                amplifiers[i].run();
+            } else if (i == 4) {
+                break;
+            }
+        }
+
+        if (amplifiers[4].output > maxOutput) {
+            maxOutput = amplifiers[4].output;
             arrayCopy(5, &permutation, &maxPermutation);
         }
     }
@@ -91,164 +310,3 @@ fn factorial(comptime int: comptime_int) comptime_int {
     return result;
 }
 
-fn runProgramOnAmplifier(ram: []i32, phase: i32, input: *i32, output: *i32) void {
-    var instructionPtr: u32 = 0;
-    var readPhase = false;
-    while(true) {
-        std.debug.warn("inst {} data {} ", instructionPtr, ram[instructionPtr]);
-        switch(extractOpcode(ram[instructionPtr])) {
-            1 => add(ram, &instructionPtr),
-            2 => mul(ram, &instructionPtr),
-            3 => in(ram, &instructionPtr, input, &readPhase, phase), // this is so bad but whatever
-            4 => out(ram, &instructionPtr, output),
-            5 => jmpTrue(ram, &instructionPtr),
-            6 => jmpFalse(ram, &instructionPtr),
-            7 => lessThan(ram, &instructionPtr),
-            8 => equals(ram, &instructionPtr),
-            99 => break,
-            else => unreachable,
-        }
-    }
-}
-
-fn add(ram: []i32, instructionPtr: *u32) void {
-    const modes = extractParameterModes(ram[instructionPtr.*]);
-
-    std.debug.warn("add {}:{} {}:{} {}:{}\n", 
-        if (modes[0] == IMMEDIATE_MODE) "I" else "P", ram[instructionPtr.* + 1], 
-        if (modes[1] == IMMEDIATE_MODE) "I" else "P", ram[instructionPtr.* + 2], 
-        "P", ram[instructionPtr.* + 3]);
-
-    const a = if (modes[0] == IMMEDIATE_MODE) ram[instructionPtr.* + 1] else ram[@intCast(u32, ram[instructionPtr.* + 1])];
-    const b = if (modes[1] == IMMEDIATE_MODE) ram[instructionPtr.* + 2] else ram[@intCast(u32, ram[instructionPtr.* + 2])];
-    const storePosition = @intCast(u32, ram[instructionPtr.* + 3]);
-
-    ram[storePosition] = a + b;
-
-    instructionPtr.* += 4;
-}
-
-fn mul(ram: []i32, instructionPtr: *u32) void {
-    const modes = extractParameterModes(ram[instructionPtr.*]);
-
-    std.debug.warn("mul {}:{} {}:{} {}:{}\n", 
-        if (modes[0] == IMMEDIATE_MODE) "I" else "P", ram[instructionPtr.* + 1], 
-        if (modes[1] == IMMEDIATE_MODE) "I" else "P", ram[instructionPtr.* + 2], 
-        "P", ram[instructionPtr.* + 3]);
-
-    const a = if (modes[0] == IMMEDIATE_MODE) ram[instructionPtr.* + 1] else ram[@intCast(u32, ram[instructionPtr.* + 1])];
-    const b = if (modes[1] == IMMEDIATE_MODE) ram[instructionPtr.* + 2] else ram[@intCast(u32, ram[instructionPtr.* + 2])];
-    const storePosition = @intCast(u32, ram[instructionPtr.* + 3]);
-
-    ram[storePosition] = a * b;
-
-    instructionPtr.* += 4;
-}
-
-fn in(ram: []i32, instructionPtr: *u32, input: *i32, readPhase: *bool, phase: i32) void {
-    std.debug.warn("in P:{}\n", ram[instructionPtr.* + 1]);
-    const storePosition =  @intCast(u32, ram[instructionPtr.* + 1]);
-
-    if (!readPhase.*) {
-        ram[storePosition] = phase;
-        readPhase.* = true;
-    } else {
-        ram[storePosition] = input.*;
-    }
-
-    instructionPtr.* += 2;
-}
-
-fn out(ram: []i32, instructionPtr: *u32, output: *i32) void {
-    const modes = extractParameterModes(ram[instructionPtr.*]);
-    std.debug.warn("out {}:{}\n", if (modes[0] == IMMEDIATE_MODE) "I" else "P", ram[instructionPtr.* + 1]);
-    const outValue = if (modes[0] == IMMEDIATE_MODE) ram[instructionPtr.* + 1] else ram[@intCast(u32, ram[instructionPtr.* + 1])];
-
-    std.debug.warn(" outputting {}\n", outValue);
-    output.* = outValue;
-
-    instructionPtr.* += 2;
-}
-
-fn jmpTrue(ram: []i32, instructionPtr: *u32) void {
-    const modes = extractParameterModes(ram[instructionPtr.*]);
-    std.debug.warn("jmpTrue {}:{} {}:{}\n", 
-        if (modes[0] == IMMEDIATE_MODE) "I" else "P", ram[instructionPtr.* + 1], 
-        if (modes[1] == IMMEDIATE_MODE) "I" else "P", ram[instructionPtr.* + 2]);
-
-    const condition = if (modes[0] == IMMEDIATE_MODE) ram[instructionPtr.* + 1] else ram[@intCast(u32, ram[instructionPtr.* + 1])];
-    const label = if (modes[1] == IMMEDIATE_MODE) ram[instructionPtr.* + 2] else ram[@intCast(u32, ram[instructionPtr.* + 2])];
-
-    if (condition != 0) {
-        instructionPtr.* = @intCast(u32, label);
-    } else {
-        instructionPtr.* += 3;
-    }
-}
-
-fn jmpFalse(ram: []i32, instructionPtr: *u32) void {
-    const modes = extractParameterModes(ram[instructionPtr.*]);
-    std.debug.warn("jmpFalse {}:{} {}:{}\n", 
-        if (modes[0] == IMMEDIATE_MODE) "I" else "P", ram[instructionPtr.* + 1], 
-        if (modes[1] == IMMEDIATE_MODE) "I" else "P", ram[instructionPtr.* + 2]);
-
-    const condition = if (modes[0] == IMMEDIATE_MODE) ram[instructionPtr.* + 1] else ram[@intCast(u32, ram[instructionPtr.* + 1])];
-    const label = if (modes[1] == IMMEDIATE_MODE) ram[instructionPtr.* + 2] else ram[@intCast(u32, ram[instructionPtr.* + 2])];
-
-    if (condition == 0) {
-        instructionPtr.* = @intCast(u32, label);
-    } else {
-        instructionPtr.* += 3;
-    }
-}
-
-fn lessThan(ram: []i32, instructionPtr: *u32) void {
-    const modes = extractParameterModes(ram[instructionPtr.*]);
-    std.debug.warn("lessThan {}:{} {}:{} {}:{}\n", 
-        if (modes[0] == IMMEDIATE_MODE) "I" else "P", ram[instructionPtr.* + 1], 
-        if (modes[1] == IMMEDIATE_MODE) "I" else "P", ram[instructionPtr.* + 2],
-        "P", ram[instructionPtr.* + 3]);
-    
-    const a = if (modes[0] == IMMEDIATE_MODE) ram[instructionPtr.* + 1] else ram[@intCast(u32, ram[instructionPtr.* + 1])];
-    const b = if (modes[1] == IMMEDIATE_MODE) ram[instructionPtr.* + 2] else ram[@intCast(u32, ram[instructionPtr.* + 2])];
-    const r = @intCast(u32, ram[instructionPtr.* + 3]);
-
-    ram[r] = if (a < b) 1 else 0;
-    instructionPtr.* += 4;
-}
-
-fn equals(ram: []i32, instructionPtr: *u32) void {
-    const modes = extractParameterModes(ram[instructionPtr.*]);
-    std.debug.warn("equals {}:{} {}:{} {}:{}\n", 
-        if (modes[0] == IMMEDIATE_MODE) "I" else "P", ram[instructionPtr.* + 1], 
-        if (modes[1] == IMMEDIATE_MODE) "I" else "P", ram[instructionPtr.* + 2], 
-        "P", ram[instructionPtr.* + 3]);
-    
-    const a = if (modes[0] == IMMEDIATE_MODE) ram[instructionPtr.* + 1] else ram[@intCast(u32, ram[instructionPtr.* + 1])];
-    const b = if (modes[1] == IMMEDIATE_MODE) ram[instructionPtr.* + 2] else ram[@intCast(u32, ram[instructionPtr.* + 2])];
-    const r = @intCast(u32, ram[instructionPtr.* + 3]);
-
-    ram[r] = if (a == b) 1 else 0;
-    instructionPtr.* += 4;
-}
-
-fn extractOpcode(instruction: i32) u32 {
-    return @intCast(u32, instruction) % 100;
-}
-
-fn extractParameterModes(instruction: i32) [3]u32 {
-    const firstTwoDigits = extractOpcode(instruction);
-    var rest = (@intCast(u32, instruction) - firstTwoDigits) / 100;
-
-    const a = rest % 10;
-    rest = (rest - a) / 10;
-    const b = rest % 10;
-    rest = (rest - b) / 10;
-    const c = rest % 10;
-
-    return [_]u32 {
-        a,
-        b,
-        c
-    };
-}
