@@ -27,7 +27,7 @@ const Computer = struct {
         self.executionState = .Running;
         while(true) {
             if (self.executionState != .Running) break;
-            std.debug.warn("{c} :{}: data {} ", self.id, self.instructionPtr, self.ram[self.instructionPtr]);
+            //std.debug.warn("{c} :{}: data {} ", self.id, self.instructionPtr, self.ram[self.instructionPtr]);
             switch(extractOpcode(self.ram[self.instructionPtr])) {
                 1 => self.add(),
                 2 => self.mul(),
@@ -41,7 +41,7 @@ const Computer = struct {
                 99 => self.exit(),
                 else => unreachable,
             }
-            std.debug.warn("\n");
+            //std.debug.warn("\n");
         }
     }
 
@@ -135,15 +135,15 @@ const Computer = struct {
         const modes = extractParameterModes(self.ram[self.instructionPtr]);
         if (modes[paramNumber - 1] == IMMEDIATE_MODE) {
             const result = self.ram[self.instructionPtr + paramNumber];
-            std.debug.warn("i:{} ", result);
+            //std.debug.warn("i:{} ", result);
             return result;
         } else if (modes[paramNumber - 1] == POSITION_MODE) {
             const result = self.ram[@intCast(u32, self.ram[self.instructionPtr + paramNumber])];
-            std.debug.warn("p:{} ", result);
+            //std.debug.warn("p:{} ", result);
             return result;
         } else if (modes[paramNumber - 1] == RELATIVE_MODE) {
             const result = self.ram[@intCast(u32, @intCast(i64, self.relativeBase) + self.ram[self.instructionPtr + paramNumber])];
-            std.debug.warn("r:{} ", result);
+            //std.debug.warn("r:{} ", result);
             return result;
         }
         
@@ -154,11 +154,11 @@ const Computer = struct {
         const modes = extractParameterModes(self.ram[self.instructionPtr]);
         if (modes[paramNumber - 1] == POSITION_MODE) {
             const location = @intCast(u32, self.ram[self.instructionPtr + paramNumber]);
-            std.debug.warn("p:{}<-{} ", location, value);
+            //std.debug.warn("p:{}<-{} ", location, value);
             self.ram[location] = value;
         } else if (modes[paramNumber - 1] == RELATIVE_MODE) {
             const location = @intCast(u32, @intCast(i64, self.relativeBase) + self.ram[self.instructionPtr + paramNumber]);
-            std.debug.warn("r:{}<-{} ", location, value);
+            //std.debug.warn("r:{}<-{} ", location, value);
             self.ram[location] = value;
         } else {
             unreachable;
@@ -210,7 +210,7 @@ pub fn main() anyerror!void {
     computer.id = 'A';
     computer.executionState = ExecutionState.Suspended;
     computer.instructionPtr = 0;
-    computer.phase = 1;
+    computer.phase = 2;
     computer.output = 0;
     computer.haveReadPhase = false;
     computer.haveOutputReady = false;
