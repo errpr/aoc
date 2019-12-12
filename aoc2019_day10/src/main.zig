@@ -50,14 +50,14 @@ fn TwoDimensionalSlice(comptime T: type) type {
 pub fn main() anyerror!void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const allocator = &arena.allocator;
-    // const fileString = try std.io.readFileAlloc(allocator, "input.txt");
-    const fileString = ".#..#\n.....\n#####\n....#\n...##\n";
+    const fileString = try std.io.readFileAlloc(allocator, "input.txt");
+    // const fileString = ".#..#\n.....\n#####\n....#\n...##\n";
     // const fileString = "......#.#.\n#..#.#....\n..#######.\n.#.#.###..\n.#..#.....\n..#....#.#\n#..#....#.\n.##.#..###\n##...#..#.\n.#....####\n";
 
     var width: usize = 0;
     var height: usize = 0;
     {
-        var it = std.mem.tokenize(fileString, "\n");
+        var it = std.mem.tokenize(fileString, "\r\n");
         while (it.next()) |token| {
             if (height == 0) width = token.len;
             height += 1;
@@ -88,6 +88,7 @@ pub fn main() anyerror!void {
 
     asteroids.debugPrint();
 
+    var maxScore: u32 = 0;
     {
         var i: usize = 0;
         while (i < height) : (i += 1) {
@@ -95,17 +96,19 @@ pub fn main() anyerror!void {
             while (j < width) : (j += 1) {
                 if (asteroids.get(j, i)) {
                     std.mem.copy(bool, workingAsteroids.buf, asteroids.buf);
-                    try computeScore(i, j, &workingAsteroids, &asteroidScore);
+                    const score = try computeScore(i, j, &workingAsteroids, &asteroidScore);
+                    if (score > maxScore) maxScore = score;
                 }
             }
         }
     }
 
     asteroidScore.debugPrint();
+    std.debug.warn("maxScore: {}\n", maxScore);
 }
 
-fn computeScore(startY: usize, startX: usize, asteroids: *TwoDimensionalSlice(bool), asteroidScore: *TwoDimensionalSlice(u32)) !void {
-    std.debug.warn("Beginning asteroid at x:{} y:{}\n", startX, startY);
+fn computeScore(startY: usize, startX: usize, asteroids: *TwoDimensionalSlice(bool), asteroidScore: *TwoDimensionalSlice(u32)) !u32 {
+    // std.debug.warn("Beginning asteroid at x:{} y:{}\n", startX, startY);
     var score: u32 = 0;
     const sX = @intCast(isize, startX);
     const sY = @intCast(isize, startY);
@@ -117,7 +120,7 @@ fn computeScore(startY: usize, startX: usize, asteroids: *TwoDimensionalSlice(bo
     const height = @intCast(isize, asteroids.h);
     const width = @intCast(isize, asteroids.w);
     const t: usize = @intCast(usize, std.math.max(height, width));
-    const iMax = t * t;
+    const iMax = t * t * 4;
     while (i < iMax) : (i += 1) {    
         const tX: isize = sX + x;
         const tY: isize = sY + y;
@@ -125,15 +128,15 @@ fn computeScore(startY: usize, startX: usize, asteroids: *TwoDimensionalSlice(bo
             const iX: usize = @intCast(usize, tX);
             const iY: usize = @intCast(usize, tY);
             if (asteroids.get(iX, iY)) {
-                std.debug.warn("Found asteroid in view at x:{} y:{}\n", iX, iY);
-                asteroids.debugPrint();
+                // std.debug.warn("Found asteroid in view at x:{} y:{}\n", iX, iY);
+                // asteroids.debugPrint();
                 score += 1;
                 var g: isize = 0;
                 var aX: isize = 0;
                 var aY: isize = 0;
                 if (x != 0 and y != 0) {
                     g = @intCast(isize, gcd(@intCast(usize, try std.math.absInt(x)), @intCast(usize, try std.math.absInt(y))));
-                    std.debug.warn("got gcd:{}\n", g);
+                    // std.debug.warn("got gcd:{}\n", g);
                     aX = @divTrunc(x, g);
                     aY = @divTrunc(y, g);
                 } else if (x == 0) {
@@ -143,15 +146,15 @@ fn computeScore(startY: usize, startX: usize, asteroids: *TwoDimensionalSlice(bo
                     aY = 0;
                     aX = if (x > 0) 1 else -1;
                 }
-                std.debug.warn("aY:{} aX:{}\n", aY, aX);
+                // std.debug.warn("aY:{} aX:{}\n", aY, aX);
                 var jX = tX;
                 var jY = tY;
                 while (jX >= 0 and jX < width and jY >= 0 and jY < height) {
                     const wasThere = asteroids.get(@intCast(usize, jX), @intCast(usize, jY));
                     asteroids.set(@intCast(usize, jX), @intCast(usize, jY), false);
                     if (wasThere) {
-                        std.debug.warn("Occluding asteroid at x:{} y:{}\n", jX, jY);
-                        asteroids.debugPrint();
+                        // std.debug.warn("Occluding asteroid at x:{} y:{}\n", jX, jY);
+                        // asteroids.debugPrint();
                     }
                     jX += aX;
                     jY += aY;
@@ -167,6 +170,7 @@ fn computeScore(startY: usize, startX: usize, asteroids: *TwoDimensionalSlice(bo
         y += dy;
     }
     asteroidScore.set(startX, startY, score);
+    return score;
 }
 
 fn gcd(U: usize, V: usize) usize {
